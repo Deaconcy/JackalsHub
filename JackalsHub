@@ -1,40 +1,270 @@
--- ServerScript: Discord Webhook Logger
--- Letakkan di ServerScriptService
+-- Delta Executor: Auto Player Monitor to Discord
+-- Paste langsung di executor dan execute
 
-local HttpService = game:GetService("HttpService")
+if not game:IsLoaded() then game.Loaded:Wait() end
+
 local Players = game:GetService("Players")
-local ServerStorage = game:GetService("ServerStorage")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 
 -- CONFIGURASI
-local WEBHOOK_URL = "https://discord.com/api/webhooks/..."  -- Ganti dengan webhook Anda
-local SERVER_NAME = "Private Server"  -- Nama server Anda
-local LOG_JOIN_LEAVE = true
-local LOG_CHAT = false  -- Hati-hati dengan privacy!
-local PING_ROLE_ID = ""  -- Kosongkan jika tidak mau ping role
+local DISCORD_WEBHOOK = "https://discord.com/api/webhooks/1452686367141400720/oljlzYOmSXeYqzVcNNp0UnaqRLy4idbLZ-VRRYxr1UqRet5i_qWSaoh92L5JXnWlIxI7"
+local SERVER_NAME = "Delta Monitor"
+local LOG_ALL = true -- Log semua player join/leave
 
--- Fungsi untuk mengirim ke Discord
-local function sendToDiscord(embed)
-    local data = {
-        embeds = {embed},
-        username = SERVER_NAME .. " Monitor",
-        avatar_url = "https://cdn.discordapp.com/attachments/1065850633054568529/1216150554312089650/logo_roblox.jpg"  -- Optional
+-- Check jika sudah running
+if _G.DeltaMonitor then
+    print("[Delta] Monitor sudah berjalan!")
+    return
+end
+
+_G.DeltaMonitor = true
+
+-- Fungsi bypass filter
+local function safePost(url, data)
+    local success, result = pcall(function()
+        return request({
+            Url = url,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(data)
+        })
+    end)
+    return success, result
+end
+
+-- Send to Discord
+local function sendEmbed(title, description, color, fields)
+    local embed = {
+        title = title,
+        description = description,
+        color = color,
+        fields = fields or {},
+        timestamp = DateTime.now():ToIsoDate(),
+        footer = {
+            text = "Delta Executor • " .. SERVER_NAME
+        }
     }
     
-    local success, response = pcall(function()
-        return HttpService:PostAsync(
-            WEBHOOK_URL,
-            HttpService:JSONEncode(data),
-            Enum.HttpContentType.ApplicationJson
+    local data = {
+        embeds = {embed},
+        username = "🕵️ Delta Monitor",
+        avatar_url = "https://cdn.discordapp.com/attachments/1216150554312089650/1216150554312089650/logo_roblox.jpg"
+    }
+    
+    local success, response = safePost(DISCORD_WEBHOOK, data)
+    if not success then
+        warn("[Delta] Gagal kirim ke Discord:", response)
+    end
+    return success
+end
+
+-- Get player info detail
+local function getPlayerInfo(player)
+    local success, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(
+            game:HttpGet("https://users.roblox.com/v1/users/" .. player.UserId)
         )
     end)
     
-    if not success then
-        warn("Failed to send to Discord:", response)
+    if success and data then
+        return {
+            displayName = data.displayName or player.Name,
+            created = os.date("%Y-%m-%d", data.created/1000) or "Unknown",
+            banned = data.isBanned or false
+        }
+    end
+    return nil
+end
+
+-- Player Join Monitor
+local function onPlayerAdded(player)
+    if not LOG_ALL then return end
+    
+    -- Tunggu sampai karakter load
+    player.CharacterAdded:Wait()
+    task.wait(1)
+    
+    local info = getPlayerInfo(player)
+    local playerData = string.format(
+        "👤 **%s**\n🆔 `%s`\n📅 Akun: %s hari\n%s",
+        player.Name,
+        player.UserId,
+        math.floor(player.AccountAge / 365),
+        info and "📛 Display: " .. info.displayName or ""
+    )
+    
+    sendEmbed(
+        "🎮 PLAYER JOINED",
+        playerData,
+        0x00FF00, -- Hijau
+        {
+            {name = "🌐 Server Info", value = string.format("Players: %d/%d\nJobID: `%s`", #Players:GetPlayers(), game.Players.MaxPlayers, game.JobId), inline = true},
+            {name = "🕐 Time", value = os.date("%H:%M:%S") .. "\n" .. os.date("%d/%m/%Y"), inline = true}
+        }
+    )
+    
+    print(string.format("[Delta] %s joined (Total: %d)", player.Name, #Players:GetPlayers()))
+end
+
+-- Player Leave Monitor
+local function onPlayerRemoving(player)
+    if not LOG_ALL then return end
+    
+    local playTime = "Unknown"
+    if _G.PlayerJoinTimes and _G.PlayerJoinTimes[player.UserId] then
+        local seconds = os.time() - _G.PlayerJoinTimes[player.UserId]
+        local hours = math.floor(seconds / 3600)
+        local minutes = math.floor((seconds % 3600) / 60)
+        playTime = string.format("%02d:%02d:%02d", hours, minutes, seconds % 60)
+    end
+    
+    sendEmbed(
+        "🚪 PLAYER LEFT",
+        string.format("**%s** left the server\nPlay Time: %s", player.Name, playTime),
+        0xFF0000, -- Merah
+        {
+            {name = "📊 Remaining", value = string.format("%d/%d players", #Players:GetPlayers()-1, game.Players.MaxPlayers), inline = true},
+            {name = "🆔 UserID", value = "`" .. tostring(player.UserId) .. "`", inline = true}
+        }
+    )
+    
+    print(string.format("[Delta] %s left (Remaining: %d)", player.Name, #Players:GetPlayers()-1))
+end
+
+-- Track join times
+if not _G.PlayerJoinTimes then _G.PlayerJoinTimes = {} end
+
+-- Initialize untuk player yang sudah ada
+for _, player in ipairs(Players:GetPlayers()) do
+    _G.PlayerJoinTimes[player.UserId] = os.time()
+end
+
+-- Connect events
+Players.PlayerAdded:Connect(function(player)
+    _G.PlayerJoinTimes[player.UserId] = os.time()
+    onPlayerAdded(player)
+end)
+
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- Periodic Server Status
+local function sendPeriodicUpdate()
+    while task.wait(900) do -- Setiap 15 menit
+        local players = Players:GetPlayers()
+        local playerNames = {}
+        
+        for _, p in ipairs(players) do
+            table.insert(playerNames, p.Name)
+        end
+        
+        sendEmbed(
+            "📊 SERVER STATUS",
+            string.format("**%s**\nUpdate otomatis setiap 15 menit", game.Name),
+            0x0099FF, -- Biru
+            {
+                {name = "👥 Players Online", value = string.format("%d/%d", #players, game.Players.MaxPlayers), inline = true},
+                {name = "🕐 Uptime", value = "<t:" .. tostring(math.floor(workspace:GetServerTimeNow())) .. ":R>", inline = true},
+                {name = "🎮 Game", value = string.format("[%s](https://www.roblox.com/games/%d)", game.Name, game.PlaceId), inline = false},
+                {name = "📋 Player List", value = #playerNames > 0 and table.concat(playerNames, "\n") or "No players", inline = false}
+            }
+        )
     end
 end
 
--- Log player join
-Players.PlayerAdded:Connect(function(player)
+-- Start periodic updates
+task.spawn(sendPeriodicUpdate)
+
+print("[Delta] Player Monitor aktif!")
+print("[Delta] Total players awal:", #Players:GetPlayers())
+print("[Delta] Discord Webhook:", DISCORD_WEBHOOK:sub(1, 30) .. "...")
+
+-- GUI untuk kontrol (Delta Executor)
+if not _G.DeltaMonitorGUI then
+    local OrionLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
+    local Window = OrionLib:MakeWindow({
+        Name = "Delta Player Monitor",
+        HidePremium = false,
+        SaveConfig = true,
+        ConfigFolder = "DeltaMonitor"
+    })
+    
+    local Tab = Window:MakeTab({
+        Name = "Monitor",
+        Icon = "rbxassetid://4483345998",
+        PremiumOnly = false
+    })
+    
+    Tab:AddToggle({
+        Name = "Enable Monitor",
+        Default = true,
+        Callback = function(value)
+            LOG_ALL = value
+            OrionLib:MakeNotification({
+                Name = "Delta Monitor",
+                Content = value and "Monitor aktif!" or "Monitor nonaktif",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    })
+    
+    Tab:AddButton({
+        Name = "Test Discord Webhook",
+        Callback = function()
+            sendEmbed("🧪 TEST NOTIFICATION", "Ini adalah test dari Delta Executor!\nWaktu: " .. os.date("%H:%M:%S"), 0xFFA500)
+            OrionLib:MakeNotification({
+                Name = "Test Sent!",
+                Content = "Check Discord channel",
+                Image = "rbxassetid://4483345998",
+                Time = 5
+            })
+        end
+    })
+    
+    Tab:AddButton({
+        Name = "Get Server Info",
+        Callback = function()
+            local info = string.format(
+                "PlaceID: %d\nJobID: %s\nPlayers: %d/%d\nCreator: %d",
+                game.PlaceId,
+                game.JobId,
+                #Players:GetPlayers(),
+                game.Players.MaxPlayers,
+                game.CreatorId
+            )
+            
+            OrionLib:MakeNotification({
+                Name = "Server Info",
+                Content = info,
+                Image = "rbxassetid://4483345998",
+                Time = 10
+            })
+            
+            setclipboard(info)
+        end
+    })
+    
+    Tab:AddTextbox({
+        Name = "Set Discord Webhook",
+        Default = DISCORD_WEBHOOK,
+        TextDisappear = false,
+        Callback = function(value)
+            DISCORD_WEBHOOK = value
+            OrionLib:MakeNotification({
+                Name = "Webhook Updated",
+                Content = "New webhook set!",
+                Image = "rbxassetid://4483345998",
+                Time = 3
+            })
+        end
+    })
+    
+    OrionLib:Init()
+    _G.DeltaMonitorGUI = true
+endPlayers.PlayerAdded:Connect(function(player)
     if not LOG_JOIN_LEAVE then return end
     
     local embed = {
