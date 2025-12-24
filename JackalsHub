@@ -1,0 +1,185 @@
+-- ServerScript: Discord Webhook Logger
+-- Letakkan di ServerScriptService
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ServerStorage = game:GetService("ServerStorage")
+
+-- CONFIGURASI
+local WEBHOOK_URL = "https://discord.com/api/webhooks/..."  -- Ganti dengan webhook Anda
+local SERVER_NAME = "Private Server"  -- Nama server Anda
+local LOG_JOIN_LEAVE = true
+local LOG_CHAT = false  -- Hati-hati dengan privacy!
+local PING_ROLE_ID = ""  -- Kosongkan jika tidak mau ping role
+
+-- Fungsi untuk mengirim ke Discord
+local function sendToDiscord(embed)
+    local data = {
+        embeds = {embed},
+        username = SERVER_NAME .. " Monitor",
+        avatar_url = "https://cdn.discordapp.com/attachments/1065850633054568529/1216150554312089650/logo_roblox.jpg"  -- Optional
+    }
+    
+    local success, response = pcall(function()
+        return HttpService:PostAsync(
+            WEBHOOK_URL,
+            HttpService:JSONEncode(data),
+            Enum.HttpContentType.ApplicationJson
+        )
+    end)
+    
+    if not success then
+        warn("Failed to send to Discord:", response)
+    end
+end
+
+-- Log player join
+Players.PlayerAdded:Connect(function(player)
+    if not LOG_JOIN_LEAVE then return end
+    
+    local embed = {
+        title = "👤 Player Joined",
+        description = string.format("**%s** has joined the server", player.Name),
+        color = 3066993,  -- Hijau
+        fields = {
+            {
+                name = "Player Info",
+                value = string.format("Username: %s\nUserID: %s\nAccount Age: %d days", 
+                    player.Name, 
+                    tostring(player.UserId),
+                    math.floor(player.AccountAge / 365)
+                ),
+                inline = true
+            },
+            {
+                name = "Server Info",
+                value = string.format("Total Players: %d/%d\nServer Time: %s",
+                    #Players:GetPlayers(),
+                    game.Players.MaxPlayers,
+                    os.date("%H:%M:%S")
+                ),
+                inline = true
+            }
+        },
+        footer = {
+            text = "Roblox Server Monitor"
+        },
+        timestamp = DateTime.now():ToIsoDate()
+    }
+    
+    sendToDiscord(embed)
+    
+    -- Simpan waktu join
+    local joinTime = os.time()
+    local storage = Instance.new("Folder")
+    storage.Name = player.UserId
+    storage:SetAttribute("JoinTime", joinTime)
+    storage.Parent = ServerStorage
+end)
+
+-- Log player leave
+Players.PlayerRemoving:Connect(function(player)
+    if not LOG_JOIN_LEAVE then return end
+    
+    -- Hitung playtime
+    local storage = ServerStorage:FindFirstChild(tostring(player.UserId))
+    local playTime = 0
+    if storage then
+        local joinTime = storage:GetAttribute("JoinTime")
+        if joinTime then
+            playTime = os.time() - joinTime
+        end
+        storage:Destroy()
+    end
+    
+    local hours = math.floor(playTime / 3600)
+    local minutes = math.floor((playTime % 3600) / 60)
+    local seconds = playTime % 60
+    
+    local embed = {
+        title = "🚪 Player Left",
+        description = string.format("**%s** has left the server", player.Name),
+        color = 15158332,  -- Merah
+        fields = {
+            {
+                name = "Play Time",
+                value = string.format("%02d:%02d:%02d", hours, minutes, seconds),
+                inline = true
+            },
+            {
+                name = "Server Status",
+                value = string.format("Remaining Players: %d/%d",
+                    #Players:GetPlayers() - 1,  -- Karena belum di-remove
+                    game.Players.MaxPlayers
+                ),
+                inline = true
+            }
+        },
+        footer = {
+            text = "Roblox Server Monitor"
+        },
+        timestamp = DateTime.now():ToIsoDate()
+    }
+    
+    sendToDiscord(embed)
+end)
+
+-- Periodic server status update
+local function sendServerStatus()
+    local players = Players:GetPlayers()
+    local playerList = {}
+    
+    for _, player in ipairs(players) do
+        table.insert(playerList, player.Name)
+    end
+    
+    local embed = {
+        title = "📊 Server Status Report",
+        description = string.format("**%s**", SERVER_NAME),
+        color = 3447003,  -- Biru
+        fields = {
+            {
+                name = "📈 Statistics",
+                value = string.format("Players: **%d/%d**\nServer Uptime: <t:%d:R>\nGame: [%s](https://www.roblox.com/games/%d)",
+                    #players,
+                    game.Players.MaxPlayers,
+                    math.floor(os.time() - workspace:GetServerTimeNow()),
+                    game.Name,
+                    game.PlaceId
+                ),
+                inline = false
+            },
+            {
+                name = "👥 Online Players",
+                value = #players > 0 and table.concat(playerList, "\n") or "*No players*",
+                inline = true
+            },
+            {
+                name = "🌐 Server Info",
+                value = string.format("Place ID: `%d`\nJob ID: `%s`\nRegion: `%s`",
+                    game.PlaceId,
+                    game.JobId,
+                    game:GetService("LocalizationService").Region or "Unknown"
+                ),
+                inline = true
+            }
+        },
+        thumbnail = {
+            url = string.format("https://www.roblox.com/headshot-thumbnail/image?userId=%d&width=420&height=420&format=png",
+                game.CreatorId
+            )
+        },
+        footer = {
+            text = "Auto-update setiap 30 menit"
+        },
+        timestamp = DateTime.now():ToIsoDate()
+    }
+    
+    sendToDiscord(embed)
+end
+
+-- Jadwal periodic updates (setiap 30 menit)
+while true do
+    task.wait(1800)  -- 30 menit
+    sendServerStatus()
+end
