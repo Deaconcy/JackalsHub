@@ -1,0 +1,41 @@
+local player = game:GetService("Players").LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+local itemPath = game:GetService("ReplicatedStorage").Items["Bloodmoon Whale"]
+local variantPath = game:GetService("ReplicatedStorage").Variants["Fairy Dust"]
+
+if not itemPath then
+    warn("Bloodmoon Whale item not found in ReplicatedStorage.Items.")
+    return
+end
+
+if not variantPath then
+    warn("Fairy Dust variant not found in ReplicatedStorage.Variants.")
+end
+
+local function getOrCreateInventoryFolder()
+    local inventoryFolder = player:FindFirstChild("Inventory")
+    if not inventoryFolder then
+        inventoryFolder = Instance.new("Folder")
+        inventoryFolder.Name = "Inventory"
+        inventoryFolder.Parent = player
+    end
+    return inventoryFolder
+end
+
+local function giveItemToPlayer()
+    local inventoryFolder = getOrCreateInventoryFolder()
+
+    local newItem = itemPath:Clone()
+    newItem.Parent = inventoryFolder
+    newItem.Name = "Bloodmoon Whale" -- Important: Setting the name
+	newItem.Weight = 525584
+
+	newItem.Size = "Big"
+
+    print("Successfully added Bloodmoon Whale to inventory (hopefully!).")
+end
+
+-- Attempt to Give the item to the Player
+giveItemToPlayer()
