@@ -1,10 +1,13 @@
+
 local player = game:GetService("Players").LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoid = character:WaitForChild("Humanoid")
 
+-- Define Item and Variant Paths
 local itemPath = game:GetService("ReplicatedStorage").Items["Bloodmoon Whale"]
 local variantPath = game:GetService("ReplicatedStorage").Variants["Fairy Dust"]
 
+-- Check if Item and Variant Exist
 if not itemPath then
     warn("Bloodmoon Whale item not found in ReplicatedStorage.Items.")
     return
@@ -12,8 +15,11 @@ end
 
 if not variantPath then
     warn("Fairy Dust variant not found in ReplicatedStorage.Variants.")
+    -- It might be okay to continue even if the variant isn't found, depending on how the game handles it.
+    -- Remove the 'return' if you want to proceed without the variant.
 end
 
+-- Function to find or create the player's inventory folder
 local function getOrCreateInventoryFolder()
     local inventoryFolder = player:FindFirstChild("Inventory")
     if not inventoryFolder then
@@ -24,15 +30,25 @@ local function getOrCreateInventoryFolder()
     return inventoryFolder
 end
 
+-- Function to create the item instance and add it to the inventory
 local function giveItemToPlayer()
     local inventoryFolder = getOrCreateInventoryFolder()
 
+    -- Clone the item from ReplicatedStorage
     local newItem = itemPath:Clone()
     newItem.Parent = inventoryFolder
     newItem.Name = "Bloodmoon Whale" -- Important: Setting the name
-	newItem.Weight = 525584
 
-	newItem.Size = "Big"
+	--Set Weight
+	newItem:SetAttribute("Weight", 525584) -- Use SetAttribute instead of directly assigning to Weight.
+
+	--Set Size Attribute
+	newItem:SetAttribute("Size", "Big")--Using Attribute because it is more often being used than a size value.
+	--Setting Size
+	local sizeValue = Instance.new("StringValue")--If item uses String Value, if Integer use IntValue instead.
+	sizeValue.Name = "Size"
+	sizeValue.Value = "Big"
+	sizeValue.Parent = newItem
 
     print("Successfully added Bloodmoon Whale to inventory (hopefully!).")
 end
